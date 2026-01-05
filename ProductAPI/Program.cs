@@ -4,6 +4,7 @@ using Microsoft.OpenApi;
 using Microsoft.OpenApi.Models;
 using ProductAPI.Data;          // For DapperContext
 using ProductAPI.Repositories;  // For IProductRepository
+using ProductAPI.Services;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -53,6 +54,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 // 3. REGISTER DAPPER SERVICES (Replaces EF Core AddDbContext)
 builder.Services.AddSingleton<DapperContext>();
+builder.Services.AddSingleton<ElasticSearchService>();
 builder.Services.AddScoped<IProductRepository, ProductRepository>();
 
 var app = builder.Build();

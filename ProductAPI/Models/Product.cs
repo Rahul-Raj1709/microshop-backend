@@ -5,20 +5,13 @@ namespace ProductAPI.Models;
 public class Product
 {
     public int Id { get; set; }
-
-    [Required]
     public string Name { get; set; } = string.Empty;
-
-    [Required]
+    public string Category { get; set; } = string.Empty; // New
+    public string Description { get; set; } = string.Empty; // New
     public decimal Price { get; set; }
-
-    [Required]
     public int Stock { get; set; }
-
-    // Matches the database column "seller_id" exactly
     public int seller_id { get; set; }
 }
-
 // Helper class for pagination response
 public class PagedResult<T>
 {

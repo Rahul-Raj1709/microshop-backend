@@ -24,11 +24,11 @@ public class PaymentController : ControllerBase
             return BadRequest("Invalid amount");
 
         // Simulate Card Decline for high amounts
-        if (request.Amount > 5000)
-        {
-            _logger.LogWarning("Payment Declined: Exceeds limit.");
-            return BadRequest("Payment Declined: Amount exceeds card limit.");
-        }
+        //if (request.Amount > 5000)
+        //{
+        //    _logger.LogWarning("Payment Declined: Exceeds limit.");
+        //    return BadRequest("Payment Declined: Amount exceeds card limit.");
+        //}
 
         // Simulate Success
         return Ok(new
