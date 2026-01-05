@@ -69,7 +69,14 @@ public class Worker : BackgroundService
 
                                 // 3. Finalize Order
                                 // Note: You might need to update FinalizeOrderAsync signature to accept ProductId
-                                await repo.FinalizeOrderAsync(order.UserId, product.Name, order.Quantity, product.Version);
+                                await repo.FinalizeOrderAsync(
+                                    order.UserId,
+                                    product.Name,
+                                    order.Quantity,
+                                    product.Version,
+                                    product.SellerId, // <--- Pass SellerId
+                                    product.Price     // <--- Pass Price
+                                );
                             }
                         }
                     }

@@ -15,15 +15,13 @@ public class OrderRepository
     // 1. READ (Get Stock, Price, AND Version)
     public async Task<ProductInfo> GetProductInfoAsync(int productId)
     {
-        // SQL changed from 'WHERE name = @name' to 'WHERE id = @id'
-        var sql = "SELECT id, name, price, stock, version FROM products WHERE id = @Id";
-
+        // Added seller_id
+        var sql = "SELECT id, name, price, stock, version, seller_id AS SellerId FROM products WHERE id = @Id";
         using var connection = _context.CreateConnection();
         return await connection.QuerySingleOrDefaultAsync<ProductInfo>(sql, new { Id = productId });
     }
-
     // 2. WRITE (Update ONLY if version matches)
-    public async Task FinalizeOrderAsync(int userId, string productName, int quantity, int oldVersion)
+    public async Task FinalizeOrderAsync(int userId, string productName, int quantity, int oldVersion, int sellerId, decimal price)
     {
         using var connection = _context.CreateConnection();
         connection.Open();
@@ -56,8 +54,18 @@ public class OrderRepository
             }
 
             // C. Save Order
-            var insertSql = "INSERT INTO orders (user_id, product_name, quantity, status) VALUES (@UserId, @Name, @Quantity, 'Paid & Completed')";
-            await connection.ExecuteAsync(insertSql, new { UserId = userId, Name = productName, Quantity = quantity }, transaction);
+            var totalAmount = price * quantity;
+            var insertSql = @"INSERT INTO orders (user_id, product_name, quantity, status, seller_id, total_amount, created_at) 
+                      VALUES (@UserId, @Name, @Quantity, 'Paid & Completed', @SellerId, @TotalAmount, NOW())";
+
+            await connection.ExecuteAsync(insertSql, new
+            {
+                UserId = userId,
+                Name = productName,
+                Quantity = quantity,
+                SellerId = sellerId,
+                TotalAmount = totalAmount
+            }, transaction);
 
             transaction.Commit();
         }
@@ -76,5 +84,6 @@ public class ProductInfo
     public string Name { get; set; }
     public decimal Price { get; set; }
     public int Stock { get; set; }
-    public int Version { get; set; } // <--- NEW
+    public int Version { get; set; }
+    public int SellerId { get; set; } // <--- New Field
 }
