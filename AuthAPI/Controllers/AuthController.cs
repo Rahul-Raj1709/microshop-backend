@@ -23,35 +23,46 @@ public class AuthController : ControllerBase
         _config = config;
     }
 
+    // 1. REGISTER (Customer)
     [HttpPost("register")]
     public async Task<IActionResult> Register(RegisterRequest request)
     {
         return await RegisterUserInternal(request, "Customer");
     }
 
+    // 2. REGISTER ADMIN (SuperAdmin only)
     [HttpPost("register-admin")]
     [Authorize(Roles = "SuperAdmin")]
     public async Task<IActionResult> RegisterAdmin(RegisterRequest request)
     {
+        if (await _userRepo.GetUserByEmail(request.Email) != null)
+            return BadRequest("Email already exists.");
+
+        // If password provided, create active admin directly
+        if (!string.IsNullOrEmpty(request.Password))
+        {
+            var user = new User
+            {
+                Name = request.Name, // Added
+                Username = request.Username,
+                Email = request.Email,
+                PhoneNumber = request.PhoneNumber,
+                Role = "Admin",
+                IsActive = true,
+                PasswordHash = HashPassword(request.Password),
+                OtpCode = null,
+                OtpExpiry = null
+            };
+
+            await _userRepo.CreateUser(user);
+            return Ok(new { Message = $"Admin {request.Username} created and activated." });
+        }
+
+        // Otherwise use OTP flow
         return await RegisterUserInternal(request, "Admin");
     }
 
-    [HttpPost("verify-otp")]
-    public async Task<IActionResult> VerifyOtp(VerifyOtpRequest request)
-    {
-        var user = await _userRepo.GetUserByEmail(request.Email);
-        if (user == null) return BadRequest("User not found.");
-
-        if (user.OtpCode != request.Otp || user.OtpExpiry < DateTime.UtcNow)
-            return BadRequest("Invalid or Expired OTP.");
-
-        // Hash new password and activate user
-        string hash = HashPassword(request.NewPassword);
-        await _userRepo.ActivateUserAndSetPassword(user.Id, hash);
-
-        return Ok("Password set successfully. You can now login.");
-    }
-
+    // 3. LOGIN
     [HttpPost("login")]
     public async Task<IActionResult> Login(LoginRequest request)
     {
@@ -61,55 +72,54 @@ public class AuthController : ControllerBase
             return BadRequest("Invalid email or password.");
 
         if (!user.IsActive)
-            return BadRequest("Account is not active. Please verify OTP.");
+            return BadRequest("Account is not active.");
 
         string token = CreateToken(user);
-        return Ok(new { Token = token, Role = user.Role });
+
+        // Return AuthResponse DTO with Name
+        return Ok(new AuthResponse(token, user.Role, user.Name));
     }
 
-    [HttpPost("forgot-password")]
-    public async Task<IActionResult> ForgotPassword(ForgotPasswordRequest request)
-    {
-        var user = await _userRepo.GetUserByEmail(request.Email);
-        if (user == null) return BadRequest("User not found.");
-
-        string otp = GenerateOtp();
-        await _userRepo.UpdateUserOtp(user.Id, otp, DateTime.UtcNow.AddMinutes(10));
-
-        // MOCK EMAIL SENDING
-        Console.WriteLine($"[EMAIL SENT] To: {request.Email}, OTP: {otp}");
-
-        return Ok(new { Message = "OTP sent to email.", MockOtp = otp });
-    }
-
+    // 4. GET ALL ADMINS
     [HttpGet("admins")]
     [Authorize(Roles = "SuperAdmin")]
     public async Task<IActionResult> GetAllAdmins()
     {
-        var admins = await _userRepo.GetUsersByRole("Admin");
-        return Ok(admins);
+        var users = await _userRepo.GetUsersByRole("Admin");
+
+        // Map to AdminDto (Safe model)
+        var adminDtos = users.Select(u => new AdminDto(
+            u.Id,
+            u.Name, // Added
+            u.Username,
+            u.Email,
+            u.PhoneNumber,
+            u.IsActive
+        ));
+
+        return Ok(adminDtos);
     }
 
-    [HttpDelete("{id}")]
-    [Authorize(Roles = "SuperAdmin")]
-    public async Task<IActionResult> DeleteUser(int id)
-    {
-        // Optional: Prevent deleting yourself or SuperAdmins if needed
-        await _userRepo.DeleteUser(id);
-        return Ok("User deleted successfully.");
-    }
-
+    // 5. UPDATE USER
     [HttpPut("{id}")]
     [Authorize(Roles = "SuperAdmin")]
-    public async Task<IActionResult> UpdateUser(int id, [FromBody] User user)
+    public async Task<IActionResult> UpdateUser(int id, [FromBody] UpdateAdminRequest request)
     {
-        user.Id = id; // Ensure ID matches URL
-        await _userRepo.UpdateUser(user);
+        // Map UpdateRequest -> Entity
+        var userToUpdate = new User
+        {
+            Id = id,
+            Name = request.Name, // Added
+            Email = request.Email,
+            PhoneNumber = request.PhoneNumber,
+            IsActive = request.IsActive
+        };
+
+        await _userRepo.UpdateUser(userToUpdate);
         return Ok("User updated successfully.");
     }
 
-    // --- HELPER METHODS ---
-
+    // (Internal Helper: Updated to include Name)
     private async Task<IActionResult> RegisterUserInternal(RegisterRequest request, string role)
     {
         if (await _userRepo.GetUserByEmail(request.Email) != null)
@@ -119,20 +129,40 @@ public class AuthController : ControllerBase
 
         var user = new User
         {
+            Name = request.Name, // Added
             Username = request.Username,
             Email = request.Email,
             PhoneNumber = request.PhoneNumber,
             Role = role,
             OtpCode = otp,
-            OtpExpiry = DateTime.UtcNow.AddMinutes(10)
+            OtpExpiry = DateTime.UtcNow.AddMinutes(10),
+            IsActive = false,
+            PasswordHash = ""
         };
 
         await _userRepo.CreateUser(user);
-
-        // In production, use an Email Service here (SMTP/SendGrid)
-        Console.WriteLine($"[EMAIL SENT] Welcome {role}! To: {request.Email}, OTP to set password: {otp}");
-
+        Console.WriteLine($"[EMAIL SENT] OTP: {otp}");
         return Ok(new { Message = $"User registered as {role}. Check email for OTP.", MockOtp = otp });
+    }
+
+    // ... (Keep VerifyOtp, ForgotPassword, DeleteUser, HashPassword, CreateToken, GenerateOtp as they were) ...
+    [HttpPost("verify-otp")]
+    public async Task<IActionResult> VerifyOtp(VerifyOtpRequest request)
+    {
+        var user = await _userRepo.GetUserByEmail(request.Email);
+        if (user == null) return BadRequest("User not found.");
+        if (user.OtpCode != request.Otp || user.OtpExpiry < DateTime.UtcNow) return BadRequest("Invalid OTP.");
+
+        await _userRepo.ActivateUserAndSetPassword(user.Id, HashPassword(request.NewPassword));
+        return Ok("Password set successfully.");
+    }
+
+    [HttpDelete("{id}")]
+    [Authorize(Roles = "SuperAdmin")]
+    public async Task<IActionResult> DeleteUser(int id)
+    {
+        await _userRepo.DeleteUser(id);
+        return Ok("User deleted successfully.");
     }
 
     private string GenerateOtp() => new Random().Next(100000, 999999).ToString();
@@ -148,12 +178,13 @@ public class AuthController : ControllerBase
     {
         var claims = new List<Claim>
         {
-            // USE CUSTOM SHORT NAMES:
             new Claim("username", user.Username),
             new Claim("email", user.Email),
             new Claim("role", user.Role),
             new Claim("userid", user.Id.ToString())
         };
+        // Add Name to claims if useful for frontend
+        if (!string.IsNullOrEmpty(user.Name)) claims.Add(new Claim("name", user.Name));
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -165,7 +196,17 @@ public class AuthController : ControllerBase
             expires: DateTime.Now.AddDays(1),
             signingCredentials: creds
         );
-
         return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    [HttpPost("forgot-password")]
+    public async Task<IActionResult> ForgotPassword(ForgotPasswordRequest request)
+    {
+        var user = await _userRepo.GetUserByEmail(request.Email);
+        if (user == null) return BadRequest("User not found.");
+        string otp = GenerateOtp();
+        await _userRepo.UpdateUserOtp(user.Id, otp, DateTime.UtcNow.AddMinutes(10));
+        Console.WriteLine($"[EMAIL SENT] OTP: {otp}");
+        return Ok(new { Message = "OTP sent.", MockOtp = otp });
     }
 }
