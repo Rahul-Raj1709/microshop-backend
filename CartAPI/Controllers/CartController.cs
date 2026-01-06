@@ -31,7 +31,7 @@ public class CartController : ControllerBase
         return Ok(JsonSerializer.Deserialize<List<CartItem>>(cartData.ToString()));
     }
 
-    // POST /api/cart
+    // POST /api/cart (Add or Increment)
     [HttpPost]
     public async Task<IActionResult> AddToCart(CartItem item)
     {
@@ -45,12 +45,76 @@ public class CartController : ControllerBase
             : JsonSerializer.Deserialize<List<CartItem>>(cartData.ToString());
 
         // Check if item exists, update quantity
-        var existing = cart.FirstOrDefault(x => x.Product == item.Product);
-        if (existing != null) existing.Quantity += item.Quantity;
-        else cart.Add(item);
+        // Note: Using ProductId for reliable matching
+        var existing = cart.FirstOrDefault(x => x.ProductId == item.ProductId);
+        if (existing != null)
+        {
+            existing.Quantity += item.Quantity;
+        }
+        else
+        {
+            cart.Add(item);
+        }
 
         await db.StringSetAsync(key, JsonSerializer.Serialize(cart), TimeSpan.FromDays(30));
         return Ok("Item added to cart");
+    }
+
+    // [NEW] PUT /api/cart (Update specific item quantity)
+    [HttpPut]
+    public async Task<IActionResult> UpdateCartItem(CartItem item)
+    {
+        var userId = User.FindFirst("userid")?.Value;
+        var db = _redis.GetDatabase();
+        var key = $"cart:{userId}";
+
+        var cartData = await db.StringGetAsync(key);
+        if (cartData.IsNullOrEmpty) return NotFound("Cart is empty");
+
+        var cart = JsonSerializer.Deserialize<List<CartItem>>(cartData.ToString());
+        var existing = cart.FirstOrDefault(x => x.ProductId == item.ProductId);
+
+        if (existing == null) return NotFound("Item not found in cart");
+
+        // Update the quantity directly
+        if (item.Quantity > 0)
+        {
+            existing.Quantity = item.Quantity;
+        }
+        else
+        {
+            // If quantity is 0 or less, remove it
+            cart.Remove(existing);
+        }
+
+        await db.StringSetAsync(key, JsonSerializer.Serialize(cart), TimeSpan.FromDays(30));
+        return Ok("Cart updated");
+    }
+
+    // [NEW] DELETE /api/cart/{productId} (Remove item completely)
+    [HttpDelete("{productId}")]
+    public async Task<IActionResult> RemoveFromCart(int productId)
+    {
+        var userId = User.FindFirst("userid")?.Value;
+        var db = _redis.GetDatabase();
+        var key = $"cart:{userId}";
+
+        var cartData = await db.StringGetAsync(key);
+        if (cartData.IsNullOrEmpty) return NotFound("Cart is empty");
+
+        var cart = JsonSerializer.Deserialize<List<CartItem>>(cartData.ToString());
+        var itemToRemove = cart.FirstOrDefault(x => x.ProductId == productId);
+
+        if (itemToRemove == null) return NotFound("Item not found in cart");
+
+        cart.Remove(itemToRemove);
+
+        if (cart.Count > 0)
+            await db.StringSetAsync(key, JsonSerializer.Serialize(cart), TimeSpan.FromDays(30));
+        else
+            await db.KeyDeleteAsync(key); // Clean up if empty
+
+        return Ok("Item removed from cart");
     }
 
     // POST /api/cart/checkout
@@ -59,7 +123,7 @@ public class CartController : ControllerBase
     {
         var userIdStr = User.FindFirst("userid")?.Value;
         if (string.IsNullOrEmpty(userIdStr)) return Unauthorized();
-        int userId = int.Parse(userIdStr); // We need the int UserID now
+        int userId = int.Parse(userIdStr);
 
         var db = _redis.GetDatabase();
         var key = $"cart:{userIdStr}";
@@ -70,18 +134,16 @@ public class CartController : ControllerBase
 
         var client = _httpClientFactory.CreateClient("ProducerClient");
 
-        // Forward Token Logic (Keep existing code)
         var tokenHeader = Request.Headers.Authorization.ToString();
         if (!string.IsNullOrEmpty(tokenHeader))
         {
             client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", tokenHeader);
         }
 
-        // --- NEW MAPPING ---
         var orderRequests = cart.Select(c => new
         {
-            UserId = userId,       // Explicitly passing UserID
-            ProductId = c.ProductId, // Using ID, not Name
+            UserId = userId,
+            ProductId = c.ProductId,
             Quantity = c.Quantity
         }).ToList();
 
@@ -96,7 +158,7 @@ public class CartController : ControllerBase
 
 public class CartItem
 {
-    public int ProductId { get; set; } // <--- ADDED
-    public string Product { get; set; } // Kept for UI display purposes
+    public int ProductId { get; set; }
+    public string Product { get; set; }
     public int Quantity { get; set; }
 }

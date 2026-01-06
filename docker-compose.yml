@@ -1,0 +1,140 @@
+version: '3.8'
+
+services:
+  # 1. KAFKA BROKER
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    hostname: kafka
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:29093'
+      KAFKA_LISTENERS: 'PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+
+  # 2. REDIS (New: For Shopping Cart)
+  redis:
+    image: redis:alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+
+  # 3. PRODUCER API
+  producer-api:
+    build:
+      context: ./ProducerAPI
+      dockerfile: Dockerfile
+    ports:
+      - "5000:8080"
+    environment:
+      - Kafka__BootstrapServers=kafka:29092 
+      - ASPNETCORE_ENVIRONMENT=Development
+      # ADD THIS LINE:
+      - ConnectionStrings__DefaultConnection=Host=host.docker.internal;Port=5432;Database=shop_db;Username=root;Password=kerberos1
+    depends_on:
+      - kafka
+      
+  # 4. PAYMENT API (New: Mock Stripe)
+  payment-api:
+    build:
+      context: ./PaymentAPI
+      dockerfile: Dockerfile
+    ports:
+      - "5003:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+
+  # 5. CART API (New: Redis Shopping Cart)
+  cart-api:
+    build:
+      context: ./CartAPI
+      dockerfile: Dockerfile
+    ports:
+      - "5004:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+    depends_on:
+      - redis
+      - producer-api # Cart needs to talk to Producer to checkout
+
+  # 6. CONSUMER WORKER
+  consumer-worker:
+    build:
+      context: ./ConsumerWorker
+      dockerfile: Dockerfile
+    environment:
+      - Kafka__BootstrapServers=kafka:29092
+      # Connects to LOCAL Host DB
+      - ConnectionStrings__DefaultConnection=Host=host.docker.internal;Port=5432;Database=shop_db;Username=root;Password=kerberos1
+    depends_on:
+      - kafka
+      - payment-api # Consumer calls Payment API
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # 7. AUTH API
+  auth-api:
+    build:
+      context: ./AuthAPI
+      dockerfile: Dockerfile
+    ports:
+      - "5001:8080"
+    environment:
+      - ConnectionStrings__DefaultConnection=Host=host.docker.internal;Port=5432;Database=shop_db;Username=root;Password=kerberos1
+      - ASPNETCORE_ENVIRONMENT=Development
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # 8. PRODUCT API
+  product-api:
+    build:
+      context: ./ProductAPI
+      dockerfile: Dockerfile
+    ports:
+      - "5002:8080"
+    environment:
+      - ConnectionStrings__DefaultConnection=Host=host.docker.internal;Port=5432;Database=shop_db;Username=root;Password=kerberos1
+      - ASPNETCORE_ENVIRONMENT=Development
+      - Elasticsearch__Uri=http://elasticsearch:9200
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - elasticsearch
+      
+  # 9. API GATEWAY (The Main Entry Point)
+  api-gateway:
+    build:
+      context: ./ApiGateway
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      - auth-api
+      - product-api
+      - cart-api
+      - producer-api
+      
+  # 10. ELASTICSEARCH (New)
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.10
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+    ports:
+      - "9200:9200"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+
+volumes:
+  esdata:

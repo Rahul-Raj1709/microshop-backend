@@ -34,7 +34,7 @@
         }
       ],
       "UpstreamPathTemplate": "/cart/{everything}",
-      "UpstreamHttpMethod": [ "GET", "POST" ]
+      "UpstreamHttpMethod": [ "GET", "POST", "PUT", "DELETE" ]
     },
     {
       "DownstreamPathTemplate": "/Order/{everything}",
