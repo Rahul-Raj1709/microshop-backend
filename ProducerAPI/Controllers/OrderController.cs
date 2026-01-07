@@ -36,6 +36,26 @@ public class OrderController : ControllerBase
         return Ok(orders);
     }
 
+    // --- GET Single Order Details ---
+    [HttpGet("{id}")]
+    public async Task<IActionResult> GetOrderDetails(int id)
+    {
+        var userIdClaim = User.FindFirst("userid") ?? User.FindFirst(ClaimTypes.NameIdentifier);
+        if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+            return Unauthorized("User ID not found.");
+
+        var order = await _repo.GetOrderDetails(id);
+
+        if (order == null)
+            return NotFound("Order not found");
+
+        // Optional: specific security check to ensure the user owns the order
+        if (order.UserId != userId)
+            return Forbid();
+
+        return Ok(order);
+    }
+
     // --- POST Single Order ---
     [HttpPost]
     public async Task<IActionResult> CreateOrder([FromBody] OrderRequest order)
@@ -53,11 +73,11 @@ public class OrderController : ControllerBase
             // FIX: Map using ProductId and the correct UserId
             var kafkaMessage = new
             {
-                UserId = userId, // Safe to take from Token
-                ProductId = order.ProductId, // Changed from OrderId/Product
-                Quantity = order.Quantity
+                UserId = userId,
+                ProductId = order.ProductId,
+                Quantity = order.Quantity,
+                ShippingAddress = order.ShippingAddress // <--- ADD THIS
             };
-
             var messageJson = JsonSerializer.Serialize(kafkaMessage);
             await producer.ProduceAsync(_config["Kafka:Topic"], new Message<Null, string> { Value = messageJson });
 
@@ -85,18 +105,17 @@ public class OrderController : ControllerBase
         {
             foreach (var order in orders)
             {
-                // FIX: Map using ProductId
                 var kafkaMessage = new
                 {
-                    UserId = userId, // Enforce the UserID from the Token (Security)
-                    ProductId = order.ProductId, // Updated Property
-                    Quantity = order.Quantity
+                    UserId = userId,
+                    ProductId = order.ProductId,
+                    Quantity = order.Quantity,
+                    ShippingAddress = order.ShippingAddress // <--- ADD THIS LINE
                 };
 
                 var messageJson = JsonSerializer.Serialize(kafkaMessage);
                 await producer.ProduceAsync(_config["Kafka:Topic"], new Message<Null, string> { Value = messageJson });
             }
-
             _logger.LogInformation($"Batch processed: {orders.Count} orders sent to Kafka.");
             return Ok(new { Status = "Batch Sent", Count = orders.Count });
         }

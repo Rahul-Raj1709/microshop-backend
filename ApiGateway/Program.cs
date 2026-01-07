@@ -6,7 +6,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowReact",
-        b => b.WithOrigins("http://localhost:5173")
+        b => b.WithOrigins("http://localhost:5173", "https://microshop-1709.lovable.app")
               .AllowAnyHeader()
               .AllowAnyMethod());
 });

@@ -44,8 +44,6 @@ public class CartController : ControllerBase
             ? new List<CartItem>()
             : JsonSerializer.Deserialize<List<CartItem>>(cartData.ToString());
 
-        // Check if item exists, update quantity
-        // Note: Using ProductId for reliable matching
         var existing = cart.FirstOrDefault(x => x.ProductId == item.ProductId);
         if (existing != null)
         {
@@ -60,7 +58,7 @@ public class CartController : ControllerBase
         return Ok("Item added to cart");
     }
 
-    // [NEW] PUT /api/cart (Update specific item quantity)
+    // PUT /api/cart (Update specific item quantity)
     [HttpPut]
     public async Task<IActionResult> UpdateCartItem(CartItem item)
     {
@@ -76,14 +74,12 @@ public class CartController : ControllerBase
 
         if (existing == null) return NotFound("Item not found in cart");
 
-        // Update the quantity directly
         if (item.Quantity > 0)
         {
             existing.Quantity = item.Quantity;
         }
         else
         {
-            // If quantity is 0 or less, remove it
             cart.Remove(existing);
         }
 
@@ -91,7 +87,7 @@ public class CartController : ControllerBase
         return Ok("Cart updated");
     }
 
-    // [NEW] DELETE /api/cart/{productId} (Remove item completely)
+    // DELETE /api/cart/{productId} (Remove item completely)
     [HttpDelete("{productId}")]
     public async Task<IActionResult> RemoveFromCart(int productId)
     {
@@ -112,14 +108,15 @@ public class CartController : ControllerBase
         if (cart.Count > 0)
             await db.StringSetAsync(key, JsonSerializer.Serialize(cart), TimeSpan.FromDays(30));
         else
-            await db.KeyDeleteAsync(key); // Clean up if empty
+            await db.KeyDeleteAsync(key);
 
         return Ok("Item removed from cart");
     }
 
     // POST /api/cart/checkout
+    // UPDATED: Now accepts CheckoutRequest body to capture shippingAddress
     [HttpPost("checkout")]
-    public async Task<IActionResult> Checkout()
+    public async Task<IActionResult> Checkout([FromBody] CheckoutRequest request)
     {
         var userIdStr = User.FindFirst("userid")?.Value;
         if (string.IsNullOrEmpty(userIdStr)) return Unauthorized();
@@ -140,11 +137,13 @@ public class CartController : ControllerBase
             client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", tokenHeader);
         }
 
+        // UPDATED: Include ShippingAddress in the payload sent to ProducerAPI
         var orderRequests = cart.Select(c => new
         {
             UserId = userId,
             ProductId = c.ProductId,
-            Quantity = c.Quantity
+            Quantity = c.Quantity,
+            ShippingAddress = request.ShippingAddress // <--- PASSED HERE
         }).ToList();
 
         var response = await client.PostAsJsonAsync("Order/batch", orderRequests);
@@ -161,4 +160,10 @@ public class CartItem
     public int ProductId { get; set; }
     public string Product { get; set; }
     public int Quantity { get; set; }
+}
+
+// NEW CLASS for request body
+public class CheckoutRequest
+{
+    public string ShippingAddress { get; set; }
 }

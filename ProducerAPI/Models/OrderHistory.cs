@@ -9,3 +9,10 @@ public class OrderHistory
     public string Status { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } // Maps to created_at
 }
+
+public class OrderDetail : OrderHistory
+{
+    public decimal TotalAmount { get; set; }
+    public string SellerName { get; set; } = string.Empty;
+    public string SellerEmail { get; set; } = string.Empty;
+}
