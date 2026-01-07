@@ -20,6 +20,25 @@
       }
     },
     {
+      "DownstreamPathTemplate": "/api/user/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "auth-api",
+          "Port": 8080
+        }
+      ],
+      "UpstreamPathTemplate": "/user/{everything}",
+      "UpstreamHttpMethod": [ "POST", "PUT", "GET", "DELETE" ],
+      "RateLimitOptions": {
+        "ClientWhitelist": [],
+        "EnableRateLimiting": true,
+        "Period": "1m",
+        "PeriodTimespan": 60.0,
+        "Limit": 10
+      }
+    },
+    {
       "DownstreamPathTemplate": "/api/Product/{everything}",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
