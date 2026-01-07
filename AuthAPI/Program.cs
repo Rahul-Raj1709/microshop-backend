@@ -1,17 +1,25 @@
 using AuthAPI.Data;
 using AuthAPI.Repositories;
+using AuthAPI.Models;       // Added
+using AuthAPI.TypeHandlers; // Added
+using Dapper;               // Added
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
-using Microsoft.OpenApi;
 using Microsoft.OpenApi.Models;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// --- ADDED: Register Dapper Type Handlers for JSONB ---
+SqlMapper.AddTypeHandler(new JsonTypeHandler<UserPreferences>());
+SqlMapper.AddTypeHandler(new JsonTypeHandler<UserProfileData>());
+// -----------------------------------------------------
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
-// 1. SWAGGER WITH AUTH (Consitent with ProductAPI)
+// ... (Rest of your Swagger and Auth config remains exactly the same) ...
+
 builder.Services.AddSwaggerGen(c =>
 {
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
@@ -27,14 +35,11 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-// 2. JWT AUTHENTICATION SETUP
 var jwtSettings = builder.Configuration.GetSection("Jwt");
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
-        // 1. STOP AUTOMATIC MAPPING (Crucial for clean tokens)
         options.MapInboundClaims = false;
-
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -44,24 +49,20 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidIssuer = jwtSettings["Issuer"],
             ValidAudience = jwtSettings["Audience"],
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings["Key"])),
-
-            // 2. TELL .NET WHERE TO FIND ROLES and NAMES
             RoleClaimType = "role",
             NameClaimType = "username"
         };
     });
 
-// 3. REGISTER DAPPER SERVICES
-builder.Services.AddSingleton<DapperContext>();        // Manages Connection String
-builder.Services.AddScoped<IUserRepository, UserRepository>(); // Handles SQL Logic
+builder.Services.AddSingleton<DapperContext>();
+builder.Services.AddScoped<IUserRepository, UserRepository>();
 
 var app = builder.Build();
 
 app.UseSwagger();
 app.UseSwaggerUI();
 
-// 4. ENABLE AUTH MIDDLEWARE
-app.UseAuthentication(); // <--- Must be before Authorization
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
