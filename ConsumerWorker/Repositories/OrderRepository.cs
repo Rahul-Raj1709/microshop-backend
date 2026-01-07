@@ -21,7 +21,7 @@ public class OrderRepository
         return await connection.QuerySingleOrDefaultAsync<ProductInfo>(sql, new { Id = productId });
     }
     // 2. WRITE (Update ONLY if version matches)
-    public async Task FinalizeOrderAsync(int userId, string productName, int quantity, int oldVersion, int sellerId, decimal price)
+    public async Task FinalizeOrderAsync(int userId, string productName, int quantity, int oldVersion, int sellerId, decimal price, string shippingAddress)
     {
         using var connection = _context.CreateConnection();
         connection.Open();
@@ -55,19 +55,17 @@ public class OrderRepository
 
             // C. Save Order
             var totalAmount = price * quantity;
-            var insertSql = @"INSERT INTO orders (user_id, product_name, quantity, status, seller_id, total_amount, created_at) 
-                      VALUES (@UserId, @Name, @Quantity, 'Paid & Completed', @SellerId, @TotalAmount, NOW())";
-
+            var insertSql = @"INSERT INTO orders (user_id, product_name, quantity, status, seller_id, total_amount, shipping_address, created_at) 
+                  VALUES (@UserId, @Name, @Quantity, 'Paid & Completed', @SellerId, @TotalAmount, @ShippingAddress, NOW())";
             await connection.ExecuteAsync(insertSql, new
             {
                 UserId = userId,
                 Name = productName,
                 Quantity = quantity,
                 SellerId = sellerId,
-                TotalAmount = totalAmount
-            }, transaction);
-
-            transaction.Commit();
+                TotalAmount = totalAmount,
+                ShippingAddress = shippingAddress // <--- ADD THIS
+            }, transaction); transaction.Commit();
         }
         catch
         {

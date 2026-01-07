@@ -1,6 +1,5 @@
 ﻿using Confluent.Kafka;
 using ConsumerWorker.Repositories;
-using System.Net.Http.Json; // Required for PostAsJsonAsync
 using System.Text.Json;
 
 namespace ConsumerWorker;
@@ -44,7 +43,7 @@ public class Worker : BackgroundService
                         var message = result.Message.Value;
                         _logger.LogInformation($"Kafka Message Received: {message}");
 
-                        // 1. DESERIALIZE HERE (This was likely missing)
+                        // 1. DESERIALIZE (Now includes ShippingAddress)
                         var order = JsonSerializer.Deserialize<OrderRequest>(message);
 
                         if (order != null)
@@ -53,7 +52,6 @@ public class Worker : BackgroundService
                             {
                                 var repo = scope.ServiceProvider.GetRequiredService<OrderRepository>();
 
-                                // CHANGED: Log ID instead of Name
                                 _logger.LogInformation($"➡️ Processing ProductID: {order.ProductId} (x{order.Quantity})");
 
                                 // 2. Get Product Info BY ID
@@ -65,18 +63,19 @@ public class Worker : BackgroundService
                                     continue;
                                 }
 
-                                // ... (Keep existing Payment and Finalize logic, passing product.Name if needed for logs) ...
-
                                 // 3. Finalize Order
-                                // Note: You might need to update FinalizeOrderAsync signature to accept ProductId
+                                // FIX: Added order.ShippingAddress as the last argument
                                 await repo.FinalizeOrderAsync(
                                     order.UserId,
                                     product.Name,
                                     order.Quantity,
                                     product.Version,
-                                    product.SellerId, // <--- Pass SellerId
-                                    product.Price     // <--- Pass Price
+                                    product.SellerId,
+                                    product.Price,
+                                    order.ShippingAddress ?? "N/A" // Handle nulls gracefully
                                 );
+
+                                _logger.LogInformation($"✅ Order Finalized for {product.Name}");
                             }
                         }
                     }
@@ -98,10 +97,11 @@ public class Worker : BackgroundService
     }
 }
 
-// Model Definition
+// FIX: Updated Model Definition to include ShippingAddress
 public class OrderRequest
 {
     public int UserId { get; set; }
-    public int ProductId { get; set; } // <--- Renamed from OrderId
+    public int ProductId { get; set; }
     public int Quantity { get; set; }
+    public string ShippingAddress { get; set; } // <--- Added this property
 }
