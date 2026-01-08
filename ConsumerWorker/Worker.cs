@@ -27,9 +27,12 @@ public class Worker : BackgroundService
         };
 
         using var consumer = new ConsumerBuilder<Ignore, string>(config).Build();
-        consumer.Subscribe(_config["Kafka:Topic"] ?? "order-requests");
 
-        _logger.LogInformation("Consumer Started. Waiting for orders...");
+        // Subscribe to BOTH topics
+        var orderTopic = _config["Kafka:Topic"] ?? "order-requests";
+        consumer.Subscribe(new[] { orderTopic, "review-events" });
+
+        _logger.LogInformation("Consumer Started. Listening for Orders and Reviews...");
 
         try
         {
@@ -41,52 +44,48 @@ public class Worker : BackgroundService
                     if (result != null)
                     {
                         var message = result.Message.Value;
-                        _logger.LogInformation($"Kafka Message Received: {message}");
+                        var topic = result.Topic;
 
-                        // 1. DESERIALIZE (Now includes ShippingAddress)
-                        var order = JsonSerializer.Deserialize<OrderRequest>(message);
-
-                        if (order != null)
+                        using (var scope = _scopeFactory.CreateScope())
                         {
-                            using (var scope = _scopeFactory.CreateScope())
+                            var repo = scope.ServiceProvider.GetRequiredService<OrderRepository>();
+
+                            // --- HANDLE ORDERS ---
+                            if (topic == orderTopic)
                             {
-                                var repo = scope.ServiceProvider.GetRequiredService<OrderRepository>();
-
-                                _logger.LogInformation($"➡️ Processing ProductID: {order.ProductId} (x{order.Quantity})");
-
-                                // 2. Get Product Info BY ID
-                                var product = await repo.GetProductInfoAsync(order.ProductId);
-
-                                if (product == null || product.Stock < order.Quantity)
+                                var order = JsonSerializer.Deserialize<OrderRequest>(message);
+                                if (order != null)
                                 {
-                                    _logger.LogError($"❌ Stock Low or Product Missing (ID: {order.ProductId}).");
-                                    continue;
+                                    _logger.LogInformation($"Processing Order for Product: {order.ProductId}");
+
+                                    var product = await repo.GetProductInfoAsync(order.ProductId);
+                                    if (product != null && product.Stock >= order.Quantity)
+                                    {
+                                        await repo.FinalizeOrderAsync(
+                                            order.UserId, order.ProductId, product.Name,
+                                            order.Quantity, product.Version, product.SellerId,
+                                            product.Price, order.ShippingAddress ?? "N/A");
+                                    }
                                 }
+                            }
+                            // --- HANDLE REVIEWS ---
+                            else if (topic == "review-events")
+                            {
+                                var review = JsonSerializer.Deserialize<ReviewEvent>(message);
+                                if (review != null)
+                                {
+                                    _logger.LogInformation($"⭐ New Review for Product {review.ProductId} ({review.Rating} stars)");
 
-                                // 3. Finalize Order
-                                // FIX: Added order.ShippingAddress as the last argument
-                                await repo.FinalizeOrderAsync(
-                                    order.UserId,
-                                    product.Name,
-                                    order.Quantity,
-                                    product.Version,
-                                    product.SellerId,
-                                    product.Price,
-                                    order.ShippingAddress ?? "N/A" // Handle nulls gracefully
-                                );
-
-                                _logger.LogInformation($"✅ Order Finalized for {product.Name}");
+                                    // Update the stats in Products table
+                                    await repo.UpdateProductReviewStats(review.ProductId, review.Rating);
+                                }
                             }
                         }
                     }
                 }
-                catch (ConsumeException e)
-                {
-                    _logger.LogError($"Kafka Error: {e.Error.Reason}");
-                }
                 catch (Exception ex)
                 {
-                    _logger.LogError($"General Error: {ex.Message}");
+                    _logger.LogError($"Error processing message: {ex.Message}");
                 }
             }
         }
@@ -97,11 +96,18 @@ public class Worker : BackgroundService
     }
 }
 
-// FIX: Updated Model Definition to include ShippingAddress
+// Support Classes
 public class OrderRequest
 {
     public int UserId { get; set; }
     public int ProductId { get; set; }
     public int Quantity { get; set; }
-    public string ShippingAddress { get; set; } // <--- Added this property
+    public string ShippingAddress { get; set; }
+}
+
+public class ReviewEvent
+{
+    public string Type { get; set; }
+    public int ProductId { get; set; }
+    public int Rating { get; set; }
 }

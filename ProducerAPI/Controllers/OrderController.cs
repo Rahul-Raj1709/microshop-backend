@@ -24,19 +24,21 @@ public class OrderController : ControllerBase
         _repo = repo;
     }
 
-    // --- GET Order History ---
+    // --- GET Order History (Paginated & Filtered) ---
     [HttpGet("history")]
-    public async Task<IActionResult> GetOrderHistory()
+    public async Task<IActionResult> GetOrderHistory(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 5,
+        [FromQuery] int? year = null)
     {
         var userIdClaim = User.FindFirst("userid") ?? User.FindFirst(ClaimTypes.NameIdentifier);
         if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
             return Unauthorized("User ID not found.");
 
-        var orders = await _repo.GetOrdersByUserId(userId);
-        return Ok(orders);
+        var result = await _repo.GetOrdersByUserId(userId, page, pageSize, year);
+        return Ok(result);
     }
 
-    // --- GET Single Order Details ---
     [HttpGet("{id}")]
     public async Task<IActionResult> GetOrderDetails(int id)
     {
@@ -56,6 +58,35 @@ public class OrderController : ControllerBase
         return Ok(order);
     }
 
+    // --- POST Submit Feedback ---
+    [HttpPost("{id}/feedback")]
+    public async Task<IActionResult> SubmitFeedback(int id, [FromBody] OrderFeedbackRequest request)
+    {
+        // 1. Update Database (Orders Table)
+        var productId = await _repo.AddFeedback(id, request.Rating, request.Feedback);
+
+        if (productId == null) return NotFound("Order not found");
+
+        // 2. Publish to Kafka (Async Update of Product Stats)
+        var config = new ProducerConfig { BootstrapServers = _config["Kafka:BootstrapServers"] };
+        using var producer = new ProducerBuilder<Null, string>(config).Build();
+
+        var reviewEvent = new
+        {
+            Type = "ReviewAdded",
+            ProductId = productId.Value,
+            Rating = request.Rating
+        };
+
+        // We use a specific topic for reviews to keep things clean
+        await producer.ProduceAsync("review-events", new Message<Null, string>
+        {
+            Value = JsonSerializer.Serialize(reviewEvent)
+        });
+
+        return Ok(new { Message = "Feedback submitted successfully" });
+    }
+    
     // --- POST Single Order ---
     [HttpPost]
     public async Task<IActionResult> CreateOrder([FromBody] OrderRequest order)
