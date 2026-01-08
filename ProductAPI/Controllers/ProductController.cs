@@ -135,4 +135,17 @@ public class ProductController : ControllerBase
 
         return Ok($"Synced {count} products to Elasticsearch.");
     }
+
+    // 7. GET Single Product Details (with Reviews & Seller)
+    [HttpGet("{id}")]
+    [AllowAnonymous] // Optional: Allow public access to view products
+    public async Task<IActionResult> GetProductDetail(int id)
+    {
+        var product = await _repo.GetProductDetail(id);
+
+        if (product == null)
+            return NotFound("Product not found");
+
+        return Ok(product);
+    }
 }

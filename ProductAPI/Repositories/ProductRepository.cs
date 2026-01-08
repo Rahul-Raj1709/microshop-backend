@@ -6,13 +6,13 @@ namespace ProductAPI.Repositories;
 
 public interface IProductRepository
 {
-    // Updated signature to accept category
     Task<PagedResult<Product>> GetProducts(int? sellerId, string? category, int pageNumber, int pageSize);
     Task<IEnumerable<Product>> GetAllProducts();
     Task<int> CreateProduct(Product product);
     Task<int> DeleteProduct(int id, int sellerId);
     Task<int> UpdateProduct(Product product);
-    Task<Product?> GetProductById(int id); // Added helper for sync
+    Task<Product?> GetProductById(int id);
+    Task<ProductDetail?> GetProductDetail(int id);
 }
 
 public class ProductRepository : IProductRepository
@@ -26,9 +26,7 @@ public class ProductRepository : IProductRepository
 
     public async Task<IEnumerable<Product>> GetAllProducts()
     {
-        // Simple query to fetch everything without filters or limits
         var sql = "SELECT * FROM products";
-
         using var connection = _context.CreateConnection();
         return await connection.QueryAsync<Product>(sql);
     }
@@ -39,17 +37,23 @@ public class ProductRepository : IProductRepository
         int offset = (pageNumber - 1) * pageSize;
         var builder = new SqlBuilder();
 
-        // Template
+        // UPDATED SQL: Select average_rating and review_count
         var selector = builder.AddTemplate(@"
             SELECT count(*) FROM products /**where**/;
-            SELECT * FROM products /**where**/ ORDER BY id LIMIT @PageSize OFFSET @Offset;
+            
+            SELECT 
+                id, name, category, description, price, stock, seller_id,
+                average_rating AS AverageRating,
+                review_count AS ReviewCount
+            FROM products 
+            /**where**/ 
+            ORDER BY id 
+            LIMIT @PageSize OFFSET @Offset;
         ", new { PageSize = pageSize, Offset = offset });
 
-        // Filter by Seller
         if (sellerId.HasValue)
             builder.Where("seller_id = @SellerId", new { SellerId = sellerId });
 
-        // Filter by Category (New)
         if (!string.IsNullOrEmpty(category))
             builder.Where("category = @Category", new { Category = category });
 
@@ -66,28 +70,22 @@ public class ProductRepository : IProductRepository
         };
     }
 
+    // ... (Keep CreateProduct, UpdateProduct, DeleteProduct, GetProductDetail, GetProductById as they were) ...
     public async Task<int> CreateProduct(Product product)
     {
-        // Added Category and Description
         var sql = @"INSERT INTO products (name, category, description, price, stock, seller_id) 
                     VALUES (@Name, @Category, @Description, @Price, @Stock, @seller_id) 
                     RETURNING id";
-
         using var connection = _context.CreateConnection();
         return await connection.ExecuteScalarAsync<int>(sql, product);
     }
 
     public async Task<int> UpdateProduct(Product product)
     {
-        // Added Category and Description
         var sql = @"UPDATE products 
-                    SET name = @Name, 
-                        category = @Category,
-                        description = @Description,
-                        price = @Price, 
-                        stock = @Stock 
+                    SET name = @Name, category = @Category, description = @Description,
+                        price = @Price, stock = @Stock 
                     WHERE id = @Id AND seller_id = @seller_id";
-
         using var connection = _context.CreateConnection();
         return await connection.ExecuteAsync(sql, product);
     }
@@ -104,5 +102,28 @@ public class ProductRepository : IProductRepository
         var sql = "SELECT * FROM products WHERE id = @Id";
         using var connection = _context.CreateConnection();
         return await connection.QuerySingleOrDefaultAsync<Product>(sql, new { Id = id });
+    }
+
+    public async Task<ProductDetail?> GetProductDetail(int id)
+    {
+        // Keep your existing implementation here
+        var sql = @"SELECT p.*, u.name AS SellerName, u.email AS SellerEmail FROM products p LEFT JOIN users u ON p.seller_id = u.id WHERE p.id = @Id;
+                    SELECT u.name AS ReviewerName, o.rating, o.feedback, o.created_at AS Date FROM orders o LEFT JOIN users u ON o.user_id = u.id WHERE o.product_id = @Id AND o.rating > 0 ORDER BY o.created_at DESC;";
+        using var connection = _context.CreateConnection();
+        using var multi = await connection.QueryMultipleAsync(sql, new { Id = id });
+        var product = await multi.ReadSingleOrDefaultAsync<ProductDetail>();
+        if (product != null)
+        {
+            var reviews = (await multi.ReadAsync<ProductReview>()).ToList();
+            product.Reviews = reviews;
+            // Note: Now we can trust the columns in 'p' (AverageRating) instead of calculating manually, 
+            // but for ProductDetail page, calculating manually from the list is also fine.
+            if (reviews.Any())
+            {
+                product.TotalReviews = reviews.Count;
+                product.AverageRating = Math.Round(reviews.Average(r => r.Rating), 1);
+            }
+        }
+        return product;
     }
 }
