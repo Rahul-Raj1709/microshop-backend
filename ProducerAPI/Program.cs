@@ -74,12 +74,24 @@ var app = builder.Build();
 
 // Kafka Topic Setup (Keep existing logic)
 var bootstrapServers = builder.Configuration["Kafka:BootstrapServers"];
-var topicName = builder.Configuration["Kafka:Topic"];
-if (!string.IsNullOrEmpty(bootstrapServers) && !string.IsNullOrEmpty(topicName))
+var orderTopic = builder.Configuration["Kafka:Topic"];
+var reviewTopic = builder.Configuration["Kafka:ReviewTopic"];
+if (!string.IsNullOrEmpty(bootstrapServers))
 {
-    // Wrap in try-catch to prevent crash if Kafka isn't ready immediately
-    try { await KafkaTopicHelper.EnsureTopicExists(bootstrapServers, topicName); }
-    catch { /* Log error in real app */ }
+    try
+    {
+        // 1. Create Order Topic
+        if (!string.IsNullOrEmpty(orderTopic))
+            await KafkaTopicHelper.EnsureTopicExists(bootstrapServers, orderTopic);
+
+        // 2. Create Review Topic
+        if (!string.IsNullOrEmpty(reviewTopic))
+            await KafkaTopicHelper.EnsureTopicExists(bootstrapServers, reviewTopic);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Kafka Setup Error: {ex.Message}");
+    }
 }
 
 app.UseSwagger();
