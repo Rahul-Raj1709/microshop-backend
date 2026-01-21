@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Security.Cryptography;
+using System.Security.Cryptography; // Required for RandomNumberGenerator
 using System.Text;
 
 namespace AuthAPI.Controllers;
@@ -30,7 +30,7 @@ public class AuthController : ControllerBase
         return await RegisterUserInternal(request, "Customer");
     }
 
-    // 2. REGISTER ADMIN (SuperAdmin only)
+    // 2. REGISTER ADMIN (Fixed Hashing)
     [HttpPost("register-admin")]
     [Authorize(Roles = "SuperAdmin")]
     public async Task<IActionResult> RegisterAdmin(RegisterRequest request)
@@ -38,18 +38,18 @@ public class AuthController : ControllerBase
         if (await _userRepo.GetUserByEmail(request.Email) != null)
             return BadRequest("Email already exists.");
 
-        // If password provided, create active admin directly
         if (!string.IsNullOrEmpty(request.Password))
         {
             var user = new User
             {
-                Name = request.Name, // Added
+                Name = request.Name,
                 Username = request.Username,
                 Email = request.Email,
                 PhoneNumber = request.PhoneNumber,
                 Role = "Admin",
                 IsActive = true,
-                PasswordHash = HashPassword(request.Password),
+                // SECURITY FIX: Use BCrypt for hashing
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
                 OtpCode = null,
                 OtpExpiry = null
             };
@@ -58,25 +58,23 @@ public class AuthController : ControllerBase
             return Ok(new { Message = $"Admin {request.Username} created and activated." });
         }
 
-        // Otherwise use OTP flow
         return await RegisterUserInternal(request, "Admin");
     }
 
-    // 3. LOGIN
+    // 3. LOGIN (Fixed Verification)
     [HttpPost("login")]
     public async Task<IActionResult> Login(LoginRequest request)
     {
         var user = await _userRepo.GetUserByEmail(request.Email);
 
-        if (user == null || user.PasswordHash != HashPassword(request.Password))
+        // SECURITY FIX: Use BCrypt.Verify
+        if (user == null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
             return BadRequest("Invalid email or password.");
 
         if (!user.IsActive)
             return BadRequest("Account is not active.");
 
         string token = CreateToken(user);
-
-        // Return AuthResponse DTO with Name
         return Ok(new AuthResponse(token, user.Role, user.Name));
     }
 
@@ -145,18 +143,25 @@ public class AuthController : ControllerBase
         return Ok(new { Message = $"User registered as {role}. Check email for OTP.", MockOtp = otp });
     }
 
-    // ... (Keep VerifyOtp, ForgotPassword, DeleteUser, HashPassword, CreateToken, GenerateOtp as they were) ...
+    // 6. VERIFY OTP (Fixed Hashing)
     [HttpPost("verify-otp")]
     public async Task<IActionResult> VerifyOtp(VerifyOtpRequest request)
     {
         var user = await _userRepo.GetUserByEmail(request.Email);
         if (user == null) return BadRequest("User not found.");
-        if (user.OtpCode != request.Otp || user.OtpExpiry < DateTime.UtcNow) return BadRequest("Invalid OTP.");
 
-        await _userRepo.ActivateUserAndSetPassword(user.Id, HashPassword(request.NewPassword));
+        // Ensure secure comparison (optional but good practice) and expiry check
+        if (user.OtpCode != request.Otp || user.OtpExpiry < DateTime.UtcNow)
+            return BadRequest("Invalid OTP.");
+
+        // SECURITY FIX: Hash the new password with BCrypt before saving
+        string newPasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+
+        await _userRepo.ActivateUserAndSetPassword(user.Id, newPasswordHash);
         return Ok("Password set successfully.");
     }
 
+    // 7. DELETE USER
     [HttpDelete("{id}")]
     [Authorize(Roles = "SuperAdmin")]
     public async Task<IActionResult> DeleteUser(int id)
@@ -165,13 +170,10 @@ public class AuthController : ControllerBase
         return Ok("User deleted successfully.");
     }
 
-    private string GenerateOtp() => new Random().Next(100000, 999999).ToString();
-
-    private string HashPassword(string password)
+    private string GenerateOtp()
     {
-        using var sha256 = SHA256.Create();
-        var bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
-        return Convert.ToBase64String(bytes);
+        // SECURITY FIX: Use Cryptographically Secure RNG
+        return RandomNumberGenerator.GetInt32(100000, 999999).ToString();
     }
 
     private string CreateToken(User user)
@@ -183,7 +185,6 @@ public class AuthController : ControllerBase
             new Claim("role", user.Role),
             new Claim("userid", user.Id.ToString())
         };
-        // Add Name to claims if useful for frontend
         if (!string.IsNullOrEmpty(user.Name)) claims.Add(new Claim("name", user.Name));
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]));
@@ -198,7 +199,8 @@ public class AuthController : ControllerBase
         );
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
-
+    
+    // 8. FORGOT PASSWORD
     [HttpPost("forgot-password")]
     public async Task<IActionResult> ForgotPassword(ForgotPasswordRequest request)
     {

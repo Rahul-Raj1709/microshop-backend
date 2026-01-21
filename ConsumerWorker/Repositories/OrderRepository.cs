@@ -20,7 +20,7 @@ public class OrderRepository
         return await connection.QuerySingleOrDefaultAsync<ProductInfo>(sql, new { Id = productId });
     }
 
-    // 2. WRITE (Fix: Added productId parameter)
+    // 2. WRITE (Fixed: Uses ProductId for concurrency check instead of Name)
     public async Task FinalizeOrderAsync(int userId, int productId, string productName, int quantity, int oldVersion, int sellerId, decimal price, string shippingAddress)
     {
         using var connection = _context.CreateConnection();
@@ -29,28 +29,30 @@ public class OrderRepository
 
         try
         {
-            // A. Attempt Atomic Update
+            // A. Attempt Atomic Update (Optimistic Concurrency)
+            // FIX: Changed 'WHERE name = @Name' to 'WHERE id = @ProductId' for safety.
             var updateSql = @"
                 UPDATE products 
                 SET stock = stock - @Quantity, 
                     version = version + 1 
-                WHERE name = @Name 
+                WHERE id = @ProductId 
                   AND version = @OldVersion 
                   AND stock >= @Quantity";
 
             var rowsAffected = await connection.ExecuteAsync(updateSql, new
             {
                 Quantity = quantity,
-                Name = productName,
+                ProductId = productId, // Use the ID here
                 OldVersion = oldVersion
             }, transaction);
 
             if (rowsAffected == 0)
             {
-                throw new Exception("Concurrency Conflict: Stock changed during payment.");
+                // This means either the stock was too low OR the version changed (someone else bought it)
+                throw new Exception("Concurrency Conflict: Stock changed or insufficient during payment.");
             }
 
-            // B. Save Order (Fix: Added product_id to INSERT)
+            // B. Save Order
             var totalAmount = price * quantity;
             var insertSql = @"INSERT INTO orders (user_id, product_id, product_name, quantity, status, seller_id, total_amount, shipping_address, created_at) 
                   VALUES (@UserId, @ProductId, @Name, @Quantity, 'Paid & Completed', @SellerId, @TotalAmount, @ShippingAddress, NOW())";
@@ -58,7 +60,7 @@ public class OrderRepository
             await connection.ExecuteAsync(insertSql, new
             {
                 UserId = userId,
-                ProductId = productId, // <--- Pass this value
+                ProductId = productId,
                 Name = productName,
                 Quantity = quantity,
                 SellerId = sellerId,
@@ -78,9 +80,6 @@ public class OrderRepository
     public async Task UpdateProductReviewStats(int productId, int rating)
     {
         using var connection = _context.CreateConnection();
-
-        // We simply increment the count and sum. 
-        // Postgres automatically recalculates 'average_rating' because of the GENERATED column.
         var sql = @"
             UPDATE products 
             SET review_count = review_count + 1,
