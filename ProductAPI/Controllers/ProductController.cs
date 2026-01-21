@@ -123,19 +123,14 @@ public class ProductController : ControllerBase
     [Authorize(Roles = "SuperAdmin,Admin")]
     public async Task<IActionResult> SyncAllProducts()
     {
-        // Requires IProductRepository to have GetAllProducts()
         var allProducts = await _repo.GetAllProducts();
 
-        int count = 0;
-        foreach (var product in allProducts)
-        {
-            await _elastic.IndexProductAsync(product);
-            count++;
-        }
+        // Use the new bulk method
+        await _elastic.BulkIndexProductsAsync(allProducts);
 
-        return Ok($"Synced {count} products to Elasticsearch.");
+        return Ok($"Synced {allProducts.Count()} products to Elasticsearch.");
     }
-
+    
     // 7. GET Single Product Details (with Reviews & Seller)
     [HttpGet("{id}")]
     [AllowAnonymous] // Optional: Allow public access to view products

@@ -85,7 +85,7 @@ if (!string.IsNullOrEmpty(bootstrapServers) && !string.IsNullOrEmpty(topicName))
 app.UseSwagger();
 app.UseSwaggerUI();
 
-app.UseHttpsRedirection();
+//app.UseHttpsRedirection();
 
 // 3. ENABLE AUTH MIDDLEWARE (Must be in this order!)
 app.UseAuthentication(); // <--- Verifies the "Who"

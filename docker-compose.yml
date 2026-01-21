@@ -21,6 +21,19 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
       KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
       CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+    # HEALTHCHECK: Fixes startup errors by letting apps wait for readiness
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s       # Increased from 5s
+      retries: 20        # Increased from 5 (gives it ~3 minutes to start)
+      start_period: 40s  # Increased from 10s
+    # LOGGING: Prevents disk from filling up
+    logging:
+      driver: "local"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # 2. REDIS (New: For Shopping Cart)
   redis:
@@ -28,8 +41,13 @@ services:
     container_name: redis
     ports:
       - "6379:6379"
+    logging:
+      driver: "local"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # 3. PRODUCER API
+# 3. PRODUCER API
   producer-api:
     build:
       context: ./ProducerAPI
@@ -39,11 +57,11 @@ services:
     environment:
       - Kafka__BootstrapServers=kafka:29092 
       - ASPNETCORE_ENVIRONMENT=Development
-      # ADD THIS LINE:
       - ConnectionStrings__DefaultConnection=Host=host.docker.internal;Port=5432;Database=shop_db;Username=root;Password=kerberos1
     depends_on:
-      - kafka
-      
+      kafka:
+        condition: service_healthy
+
   # 4. PAYMENT API (New: Mock Stripe)
   payment-api:
     build:
@@ -65,7 +83,7 @@ services:
       - ASPNETCORE_ENVIRONMENT=Development
     depends_on:
       - redis
-      - producer-api # Cart needs to talk to Producer to checkout
+      - producer-api
 
   # 6. CONSUMER WORKER
   consumer-worker:
@@ -77,8 +95,10 @@ services:
       # Connects to LOCAL Host DB
       - ConnectionStrings__DefaultConnection=Host=host.docker.internal;Port=5432;Database=shop_db;Username=root;Password=kerberos1
     depends_on:
-      - kafka
-      - payment-api # Consumer calls Payment API
+      kafka:
+        condition: service_healthy
+      payment-api:
+        condition: service_started
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -135,6 +155,11 @@ services:
       - "9200:9200"
     volumes:
       - esdata:/usr/share/elasticsearch/data
+    logging:
+      driver: "local"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   esdata:

@@ -14,13 +14,34 @@ public class ElasticSearchService
         _client = new ElasticsearchClient(uri);
     }
 
-    // 1. Index
+    // 1. Index Single
     public async Task IndexProductAsync(Product product)
     {
         var response = await _client.IndexAsync(product, idx => idx.Index("products"));
         if (!response.IsValidResponse)
         {
             Console.WriteLine($"Failed to index: {response.DebugInformation}");
+        }
+    }
+
+    // NEW: Bulk Index (Fixes N+1 issue)
+    public async Task BulkIndexProductsAsync(IEnumerable<Product> products)
+    {
+        var response = await _client.BulkAsync(b => b
+            .Index("products")
+            .IndexMany(products)
+        );
+
+        if (!response.IsValidResponse)
+        {
+            Console.WriteLine($"Bulk index failed: {response.DebugInformation}");
+        }
+        else if (response.Errors)
+        {
+            foreach (var item in response.ItemsWithErrors)
+            {
+                Console.WriteLine($"Failed to index item {item.Id}: {item.Error}");
+            }
         }
     }
 
