@@ -30,7 +30,9 @@ public class Worker : BackgroundService
 
         // Subscribe to BOTH topics
         var orderTopic = _config["Kafka:Topic"] ?? "order-requests";
-        consumer.Subscribe(new[] { orderTopic, "review-events" });
+        var reviewTopic = _config["Kafka:ReviewTopic"] ?? "review-events"; // <--- READ NEW CONFIG
+
+        consumer.Subscribe(new[] { orderTopic, reviewTopic });
 
         _logger.LogInformation("Consumer Started. Listening for Orders and Reviews...");
 
@@ -69,7 +71,7 @@ public class Worker : BackgroundService
                                 }
                             }
                             // --- HANDLE REVIEWS ---
-                            else if (topic == "review-events")
+                            else if (topic == reviewTopic)
                             {
                                 var review = JsonSerializer.Deserialize<ReviewEvent>(message);
                                 if (review != null)

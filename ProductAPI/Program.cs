@@ -56,6 +56,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddSingleton<DapperContext>();
 builder.Services.AddSingleton<ElasticSearchService>();
 builder.Services.AddScoped<IProductRepository, ProductRepository>();
+builder.Services.AddScoped<IWishlistRepository, WishlistRepository>();
 
 var app = builder.Build();
 

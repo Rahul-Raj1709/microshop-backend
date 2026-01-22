@@ -56,12 +56,16 @@ services:
       - "5000:8080"
     environment:
       - Kafka__BootstrapServers=kafka:29092 
+      - Kafka__Topic=order-requests
+      - Kafka__ReviewTopic=review-events
       - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__DefaultConnection=Host=host.docker.internal;Port=5432;Database=shop_db;Username=root;Password=kerberos1
     depends_on:
       kafka:
         condition: service_healthy
-
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      
   # 4. PAYMENT API (New: Mock Stripe)
   payment-api:
     build:
@@ -91,13 +95,16 @@ services:
       context: ./ConsumerWorker
       dockerfile: Dockerfile
     environment:
-      - Kafka__BootstrapServers=kafka:29092
-      # Connects to LOCAL Host DB
+      - Kafka__BootstrapServers=kafka:29092 
+      - Kafka__Topic=order-requests
+      - Kafka__ReviewTopic=review-events
       - ConnectionStrings__DefaultConnection=Host=host.docker.internal;Port=5432;Database=shop_db;Username=root;Password=kerberos1
     depends_on:
       kafka:
         condition: service_healthy
       payment-api:
+        condition: service_started
+      producer-api:
         condition: service_started
     extra_hosts:
       - "host.docker.internal:host-gateway"

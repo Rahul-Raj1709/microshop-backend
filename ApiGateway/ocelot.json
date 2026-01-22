@@ -58,6 +58,25 @@
       }
     },
     {
+      "DownstreamPathTemplate": "/api/Wishlist/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "product-api",
+          "Port": 8080
+        }
+      ],
+      "UpstreamPathTemplate": "/wishlist/{everything}",
+      "UpstreamHttpMethod": [ "GET", "POST", "DELETE" ],
+      "RateLimitOptions": {
+        "ClientWhitelist": [],
+        "EnableRateLimiting": true,
+        "Period": "1m",
+        "PeriodTimespan": 60.0,
+        "Limit": 20
+      }
+    },
+    {
       "DownstreamPathTemplate": "/api/Cart/{everything}",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
