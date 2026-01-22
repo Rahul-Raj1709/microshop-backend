@@ -9,7 +9,7 @@ namespace ProductAPI.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
-[Authorize]
+[Authorize] // 🔒 Default: Blocks everything unless specified otherwise
 public class ProductController : ControllerBase
 {
     private readonly IProductRepository _repo;
@@ -31,13 +31,16 @@ public class ProductController : ControllerBase
 
     // 1. GET: Standard Database Pagination (with Filtering)
     [HttpGet]
+    [AllowAnonymous] // ✅ ADD THIS: Allows public access
     public async Task<IActionResult> GetProducts(
         [FromQuery] string? category = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 10)
     {
         int? filterSellerId = null;
-        // Admins only see their own products in the dashboard list
+
+        // This check is safe: unauthenticated users return 'false' for IsInRole,
+        // so we skip the block and simply return all products (filterSellerId = null).
         if (User.IsInRole("Admin") || User.IsInRole("SuperAdmin"))
         {
             filterSellerId = GetCurrentUserId();
@@ -49,6 +52,7 @@ public class ProductController : ControllerBase
 
     // 2. SEARCH: Elasticsearch (Fuzzy Search)
     [HttpGet("search")]
+    [AllowAnonymous] // ✅ ADD THIS: Allows public access
     public async Task<IActionResult> SearchProducts([FromQuery] string q)
     {
         if (string.IsNullOrWhiteSpace(q))
@@ -56,8 +60,6 @@ public class ProductController : ControllerBase
 
         int? filterSellerId = null;
 
-        // CRITICAL FIX: Only Admins are restricted to their own ID.
-        // Customers (who are not Admin) will keep filterSellerId = null (Search All).
         if (User.IsInRole("Admin") || User.IsInRole("SuperAdmin"))
         {
             filterSellerId = GetCurrentUserId();
@@ -69,7 +71,7 @@ public class ProductController : ControllerBase
 
     // 3. CREATE: Sync to Elastic
     [HttpPost]
-    [Authorize(Roles = "SuperAdmin,Admin")]
+    [Authorize(Roles = "SuperAdmin,Admin")] // Remains protected
     public async Task<IActionResult> CreateProduct(Product product)
     {
         product.seller_id = GetCurrentUserId();
@@ -85,7 +87,7 @@ public class ProductController : ControllerBase
 
     // 4. UPDATE: Sync to Elastic
     [HttpPut("{id}")]
-    [Authorize(Roles = "SuperAdmin,Admin")]
+    [Authorize(Roles = "SuperAdmin,Admin")] // Remains protected
     public async Task<IActionResult> UpdateProduct(int id, [FromBody] Product product)
     {
         product.Id = id;
@@ -103,7 +105,7 @@ public class ProductController : ControllerBase
 
     // 5. DELETE: Remove from Elastic
     [HttpDelete("{id}")]
-    [Authorize(Roles = "SuperAdmin,Admin")]
+    [Authorize(Roles = "SuperAdmin,Admin")] // Remains protected
     public async Task<IActionResult> DeleteProduct(int id)
     {
         int currentUserId = GetCurrentUserId();
@@ -120,20 +122,17 @@ public class ProductController : ControllerBase
 
     // 6. SYNC ALL: Manual Trigger
     [HttpPost("sync-all")]
-    [Authorize(Roles = "SuperAdmin,Admin")]
+    [Authorize(Roles = "SuperAdmin,Admin")] // Remains protected
     public async Task<IActionResult> SyncAllProducts()
     {
         var allProducts = await _repo.GetAllProducts();
-
-        // Use the new bulk method
         await _elastic.BulkIndexProductsAsync(allProducts);
-
         return Ok($"Synced {allProducts.Count()} products to Elasticsearch.");
     }
-    
+
     // 7. GET Single Product Details (with Reviews & Seller)
     [HttpGet("{id}")]
-    [AllowAnonymous] // Optional: Allow public access to view products
+    [AllowAnonymous] // ✅ Already exists here, which is good
     public async Task<IActionResult> GetProductDetail(int id)
     {
         var product = await _repo.GetProductDetail(id);
