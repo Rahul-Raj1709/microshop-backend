@@ -8,8 +8,10 @@ public interface IUserRepository
 {
     Task<User?> GetUserByEmail(string email);
     Task<User?> GetUserById(int id);
+    Task<IEnumerable<User>> GetUsersByRole(string role);
     Task CreateUser(User user);
     Task UpdateUser(User user); // General update
+    Task DeleteUser(int id);
     Task UpdateUserOtp(int userId, string otp, DateTime expiry);
     Task ActivateUserAndSetPassword(int userId, string passwordHash);
     Task SaveRefreshToken(int userId, string refreshToken);
@@ -57,6 +59,21 @@ public class UserRepository : IUserRepository
         return user;
     }
 
+    public async Task<IEnumerable<User>> GetUsersByRole(string role)
+    {
+        var sql = @"
+            SELECT 
+                id, username, email, password_hash AS PasswordHash, role, 
+                name, phone_number AS PhoneNumber, avatar_url AS AvatarUrl, 
+                is_active AS IsActive, otp_code AS OtpCode, otp_expiry AS OtpExpiry, 
+                refresh_token AS RefreshToken, preferences
+            FROM users 
+            WHERE role = @Role";
+
+        using var connection = _context.CreateConnection();
+        return await connection.QueryAsync<User>(sql, new { Role = role });
+    }
+
     public async Task CreateUser(User user)
     {
         var sql = @"
@@ -83,6 +100,12 @@ public class UserRepository : IUserRepository
 
         using var connection = _context.CreateConnection();
         await connection.ExecuteAsync(sql, user);
+    }
+    public async Task DeleteUser(int id)
+    {
+        var sql = "DELETE FROM users WHERE id = @Id";
+        using var connection = _context.CreateConnection();
+        await connection.ExecuteAsync(sql, new { Id = id });
     }
 
     public async Task UpdateUserOtp(int userId, string otp, DateTime expiry)

@@ -2,7 +2,6 @@
 
 namespace AuthAPI.Models;
 
-// Matches 'users' table in identity_db
 public class User
 {
     public int Id { get; set; }
@@ -22,6 +21,14 @@ public class User
     public List<UserAddress> Addresses { get; set; } = new();
 }
 
+public class UpdateAdminRequest
+{
+    public string Name { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string PhoneNumber { get; set; } = string.Empty;
+    public bool IsActive { get; set; }
+}
+
 // Matches 'user_addresses' table
 public class UserAddress
 {
@@ -38,6 +45,7 @@ public class UserPreferences
     public string Theme { get; set; } = "system";
     public string Language { get; set; } = "en";
     public bool TwoFactorEnabled { get; set; }
+    public string? TwoFactorSecret { get; set; }
     public NotificationPrefs Notifications { get; set; } = new();
     public SellerOpsPreferences? SellerOps { get; set; }
     public PlatformConfigPreferences? PlatformConfig { get; set; }
@@ -82,3 +90,7 @@ public record UpdateProfileRequest(string Name, string PhoneNumber, string Avata
 public record AddAddressRequest(string Label, string AddressLine, bool IsDefault);
 public record VerifyOtpRequest(string Email, string Otp, string NewPassword);
 public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+public record TwoFactorSetupResponse(string QrCodeUri, string ManualEntryKey);
+public record TwoFactorVerifyRequest(string Code);
+public record TwoFactorLoginRequest(string Email, string Code, string Password);
+public record AdminDto(int Id, string Name, string Username, string Email, string PhoneNumber, bool IsActive);

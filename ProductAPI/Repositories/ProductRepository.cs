@@ -43,6 +43,7 @@ public class ProductRepository : IProductRepository
             
             SELECT 
                 id, name, category, description, price, stock, seller_id,
+                sale_price AS SalePrice,
                 average_rating AS AverageRating,
                 review_count AS ReviewCount
             FROM products 
@@ -73,8 +74,8 @@ public class ProductRepository : IProductRepository
     // ... (Keep CreateProduct, UpdateProduct, DeleteProduct, GetProductDetail, GetProductById as they were) ...
     public async Task<int> CreateProduct(Product product)
     {
-        var sql = @"INSERT INTO products (name, category, description, price, stock, seller_id) 
-                    VALUES (@Name, @Category, @Description, @Price, @Stock, @seller_id) 
+        var sql = @"INSERT INTO products (name, category, description, price, sale_price, stock, seller_id) 
+                    VALUES (@Name, @Category, @Description, @Price, @SalePrice, @Stock, @seller_id) 
                     RETURNING id";
         using var connection = _context.CreateConnection();
         return await connection.ExecuteScalarAsync<int>(sql, product);
@@ -84,7 +85,7 @@ public class ProductRepository : IProductRepository
     {
         var sql = @"UPDATE products 
                     SET name = @Name, category = @Category, description = @Description,
-                        price = @Price, stock = @Stock 
+                        price = @Price, sale_price = @SalePrice, stock = @Stock 
                     WHERE id = @Id AND seller_id = @seller_id";
         using var connection = _context.CreateConnection();
         return await connection.ExecuteAsync(sql, product);

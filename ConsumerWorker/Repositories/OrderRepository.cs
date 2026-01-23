@@ -16,7 +16,7 @@ public class OrderRepository
     public async Task<ProductInfo?> GetProductInfoAsync(int productId)
     {
         // Query CATALOG_DB
-        var sql = "SELECT id, name, price, stock, version, seller_id AS SellerId FROM products WHERE id = @Id";
+        var sql = "SELECT id, name, price, sale_price AS SalePrice, stock, version, seller_id AS SellerId FROM products WHERE id = @Id";
         using var connection = _context.CreateCatalogConnection();
         return await connection.QuerySingleOrDefaultAsync<ProductInfo>(sql, new { Id = productId });
     }
@@ -76,6 +76,7 @@ public class ProductInfo
     public int Id { get; set; }
     public string Name { get; set; }
     public decimal Price { get; set; }
+    public decimal? SalePrice { get; set; }
     public int Stock { get; set; }
     public int Version { get; set; }
     public int SellerId { get; set; }
