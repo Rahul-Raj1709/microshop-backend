@@ -20,61 +20,48 @@ public class DashboardRepository
         public int Orders { get; set; }
     }
 
+    // ProducerAPI/Repositories/DashboardRepository.cs
+
     public async Task<DashboardStats> GetStatsAsync(int? sellerId)
     {
         using var connection = _context.CreateConnection();
         var stats = new DashboardStats();
-
-        // 1. Base Filters
         string whereClause = sellerId.HasValue ? "WHERE seller_id = @SellerId" : "";
-        string productWhere = sellerId.HasValue ? "WHERE seller_id = @SellerId" : "";
 
-        // 2. Metrics
-        // We map to a class (DashboardMetrics) to avoid case-sensitivity issues with 'dynamic'
+        // 1. Metrics from ORDERS table only
         var metricsSql = $@"
-            SELECT 
-                COALESCE(SUM(total_amount), 0) as Revenue,
-                COUNT(*) as Orders
-            FROM orders {whereClause};
-            
-            SELECT COUNT(*) FROM products {productWhere};
-        ";
+        SELECT 
+            COALESCE(SUM(total_amount), 0) as Revenue,
+            COUNT(*) as Orders
+        FROM orders {whereClause}";
 
-        using (var multi = await connection.QueryMultipleAsync(metricsSql, new { SellerId = sellerId }))
-        {
-            // FIX: Read into the helper class instead of dynamic
-            var metrics = await multi.ReadFirstAsync<DashboardMetrics>();
-            stats.TotalRevenue = metrics.Revenue;
-            stats.TotalOrders = metrics.Orders;
+        var metrics = await connection.QueryFirstAsync<dynamic>(metricsSql, new { SellerId = sellerId });
+        stats.TotalRevenue = (decimal)metrics.revenue;
+        stats.TotalOrders = (int)metrics.orders;
 
-            stats.TotalProducts = await multi.ReadFirstAsync<int>();
-        }
+        // We can no longer count TotalProducts via SQL because the table isn't here.
+        // Set to 0 or fetch via HTTP Client from ProductAPI.
+        stats.TotalProducts = 0;
 
-        // 3. Top Products
+        // 2. Top Products (We can still do this because orders table has product_name!)
         var topSql = $@"
-            SELECT 
-                product_name as Name, 
-                SUM(quantity) as Sales, 
-                COALESCE(SUM(total_amount), 0) as Revenue
-            FROM orders
-            {whereClause}
-            GROUP BY product_name
-            ORDER BY Revenue DESC
-            LIMIT 5";
+        SELECT 
+            product_name as Name, 
+            SUM(quantity) as Sales, 
+            COALESCE(SUM(total_amount), 0) as Revenue
+        FROM orders
+        {whereClause}
+        GROUP BY product_name
+        ORDER BY Revenue DESC
+        LIMIT 5";
+
         stats.TopProducts = (await connection.QueryAsync<TopProductDto>(topSql, new { SellerId = sellerId })).ToList();
 
-        // 4. Recent Orders
+        // 3. Recent Orders (Works fine, removing User Join if it existed)
         var recentSql = $@"
-            SELECT 
-                id, 
-                user_id::text as Customer, 
-                product_name as Product, 
-                COALESCE(total_amount, 0) as Amount, 
-                status
-            FROM orders
-            {whereClause}
-            ORDER BY created_at DESC
-            LIMIT 5";
+        SELECT id, user_id::text as Customer, product_name as Product, total_amount as Amount, status
+        FROM orders {whereClause} ORDER BY created_at DESC LIMIT 5";
+
         stats.RecentOrders = (await connection.QueryAsync<RecentOrderDto>(recentSql, new { SellerId = sellerId })).ToList();
 
         return stats;

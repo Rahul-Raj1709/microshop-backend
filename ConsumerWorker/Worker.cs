@@ -61,16 +61,30 @@ public class Worker : BackgroundService
                                     _logger.LogInformation($"Processing Order for Product: {order.ProductId}");
 
                                     var product = await repo.GetProductInfoAsync(order.ProductId);
+
                                     if (product != null && product.Stock >= order.Quantity)
                                     {
+                                        // DETERMINE EFFECTIVE PRICE
+                                        decimal finalPrice = product.Price;
+                                        if (product.SalePrice.HasValue && product.SalePrice.Value < product.Price)
+                                        {
+                                            finalPrice = product.SalePrice.Value;
+                                            _logger.LogInformation($"Applying Discount: Original {product.Price}, Sale {finalPrice}");
+                                        }
+
                                         await repo.FinalizeOrderAsync(
-                                            order.UserId, order.ProductId, product.Name,
-                                            order.Quantity, product.Version, product.SellerId,
-                                            product.Price, order.ShippingAddress ?? "N/A");
+                                            order.UserId,
+                                            order.ProductId,
+                                            product.Name,
+                                            order.Quantity,
+                                            product.Version,
+                                            product.SellerId,
+                                            finalPrice, // <--- Use finalPrice here
+                                            order.ShippingAddress ?? "N/A"
+                                        );
                                     }
                                 }
-                            }
-                            // --- HANDLE REVIEWS ---
+                            }                            // --- HANDLE REVIEWS ---
                             else if (topic == reviewTopic)
                             {
                                 var review = JsonSerializer.Deserialize<ReviewEvent>(message);

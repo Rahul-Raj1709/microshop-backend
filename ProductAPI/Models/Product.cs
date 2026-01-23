@@ -9,6 +9,7 @@ public class Product
     public string Category { get; set; } = string.Empty; // New
     public string Description { get; set; } = string.Empty; // New
     public decimal Price { get; set; }
+    public decimal? SalePrice { get; set; }
     public int Stock { get; set; }
     public int seller_id { get; set; }
     public double AverageRating { get; set; }
