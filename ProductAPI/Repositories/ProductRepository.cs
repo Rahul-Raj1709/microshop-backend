@@ -104,26 +104,29 @@ public class ProductRepository : IProductRepository
         return await connection.QuerySingleOrDefaultAsync<Product>(sql, new { Id = id });
     }
 
+
     public async Task<ProductDetail?> GetProductDetail(int id)
     {
-        // Keep your existing implementation here
-        var sql = @"SELECT p.*, u.name AS SellerName, u.email AS SellerEmail FROM products p LEFT JOIN users u ON p.seller_id = u.id WHERE p.id = @Id;
-                    SELECT u.name AS ReviewerName, o.rating, o.feedback, o.created_at AS Date FROM orders o LEFT JOIN users u ON o.user_id = u.id WHERE o.product_id = @Id AND o.rating > 0 ORDER BY o.created_at DESC;";
+        var sqlProduct = @"SELECT * FROM products WHERE id = @Id";
+
+        var sqlReviews = @"
+        SELECT reviewer_name AS ReviewerName, rating, feedback, created_at AS Date 
+        FROM product_reviews 
+        WHERE product_id = @Id 
+        ORDER BY created_at DESC";
+
         using var connection = _context.CreateConnection();
-        using var multi = await connection.QueryMultipleAsync(sql, new { Id = id });
-        var product = await multi.ReadSingleOrDefaultAsync<ProductDetail>();
+
+        var product = await connection.QuerySingleOrDefaultAsync<ProductDetail>(sqlProduct, new { Id = id });
+
         if (product != null)
         {
-            var reviews = (await multi.ReadAsync<ProductReview>()).ToList();
-            product.Reviews = reviews;
-            // Note: Now we can trust the columns in 'p' (AverageRating) instead of calculating manually, 
-            // but for ProductDetail page, calculating manually from the list is also fine.
-            if (reviews.Any())
-            {
-                product.TotalReviews = reviews.Count;
-                product.AverageRating = Math.Round(reviews.Average(r => r.Rating), 1);
-            }
+            var reviews = await connection.QueryAsync<ProductReview>(sqlReviews, new { Id = id });
+            product.Reviews = reviews.ToList();
+
+            product.SellerName = "Seller #" + product.seller_id;
         }
+
         return product;
     }
 }

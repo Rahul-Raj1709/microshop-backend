@@ -3,6 +3,7 @@ using Dapper;
 
 namespace ConsumerWorker.Repositories;
 
+// ConsumerWorker/Repositories/OrderRepository.cs
 public class OrderRepository
 {
     private readonly DapperContext _context;
@@ -12,25 +13,19 @@ public class OrderRepository
         _context = context;
     }
 
-    // 1. READ
-    public async Task<ProductInfo> GetProductInfoAsync(int productId)
+    public async Task<ProductInfo?> GetProductInfoAsync(int productId)
     {
+        // Query CATALOG_DB
         var sql = "SELECT id, name, price, stock, version, seller_id AS SellerId FROM products WHERE id = @Id";
-        using var connection = _context.CreateConnection();
+        using var connection = _context.CreateCatalogConnection();
         return await connection.QuerySingleOrDefaultAsync<ProductInfo>(sql, new { Id = productId });
     }
 
-    // 2. WRITE (Fixed: Uses ProductId for concurrency check instead of Name)
     public async Task FinalizeOrderAsync(int userId, int productId, string productName, int quantity, int oldVersion, int sellerId, decimal price, string shippingAddress)
     {
-        using var connection = _context.CreateConnection();
-        connection.Open();
-        using var transaction = connection.BeginTransaction();
-
-        try
+        // 1. DEDUCT STOCK (Catalog DB)
+        using (var catalogConn = _context.CreateCatalogConnection())
         {
-            // A. Attempt Atomic Update (Optimistic Concurrency)
-            // FIX: Changed 'WHERE name = @Name' to 'WHERE id = @ProductId' for safety.
             var updateSql = @"
                 UPDATE products 
                 SET stock = stock - @Quantity, 
@@ -39,25 +34,23 @@ public class OrderRepository
                   AND version = @OldVersion 
                   AND stock >= @Quantity";
 
-            var rowsAffected = await connection.ExecuteAsync(updateSql, new
-            {
-                Quantity = quantity,
-                ProductId = productId, // Use the ID here
-                OldVersion = oldVersion
-            }, transaction);
+            var rowsAffected = await catalogConn.ExecuteAsync(updateSql, new { Quantity = quantity, ProductId = productId, OldVersion = oldVersion });
 
             if (rowsAffected == 0)
-            {
-                // This means either the stock was too low OR the version changed (someone else bought it)
-                throw new Exception("Concurrency Conflict: Stock changed or insufficient during payment.");
-            }
+                throw new Exception("Concurrency Conflict: Stock changed or insufficient.");
+        }
 
-            // B. Save Order
+        // 2. CREATE ORDER (Sales DB)
+        // Note: If this fails, you technically have a 'Ghost' stock deduction. 
+        // In a real app, you would publish a 'StockCompensate' event to Kafka to undo step 1.
+        using (var salesConn = _context.CreateSalesConnection())
+        {
             var totalAmount = price * quantity;
-            var insertSql = @"INSERT INTO orders (user_id, product_id, product_name, quantity, status, seller_id, total_amount, shipping_address, created_at) 
-                  VALUES (@UserId, @ProductId, @Name, @Quantity, 'Paid & Completed', @SellerId, @TotalAmount, @ShippingAddress, NOW())";
+            var insertSql = @"
+                INSERT INTO orders (user_id, product_id, product_name, quantity, status, seller_id, total_amount, shipping_address, created_at) 
+                VALUES (@UserId, @ProductId, @Name, @Quantity, 'Paid & Completed', @SellerId, @TotalAmount, @ShippingAddress, NOW())";
 
-            await connection.ExecuteAsync(insertSql, new
+            await salesConn.ExecuteAsync(insertSql, new
             {
                 UserId = userId,
                 ProductId = productId,
@@ -66,30 +59,18 @@ public class OrderRepository
                 SellerId = sellerId,
                 TotalAmount = totalAmount,
                 ShippingAddress = shippingAddress
-            }, transaction);
-
-            transaction.Commit();
-        }
-        catch
-        {
-            transaction.Rollback();
-            throw;
+            });
         }
     }
 
+    // Keeps working because it only touches Catalog DB
     public async Task UpdateProductReviewStats(int productId, int rating)
     {
-        using var connection = _context.CreateConnection();
-        var sql = @"
-            UPDATE products 
-            SET review_count = review_count + 1,
-                rating_sum = rating_sum + @Rating
-            WHERE id = @Id";
-
+        using var connection = _context.CreateCatalogConnection();
+        var sql = @"UPDATE products SET review_count = review_count + 1, rating_sum = rating_sum + @Rating WHERE id = @Id";
         await connection.ExecuteAsync(sql, new { Id = productId, Rating = rating });
     }
 }
-
 public class ProductInfo
 {
     public int Id { get; set; }

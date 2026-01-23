@@ -1,11 +1,10 @@
 ﻿using AuthAPI.Models;
 using AuthAPI.Repositories;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Security.Cryptography; // Required for RandomNumberGenerator
+using System.Security.Cryptography;
 using System.Text;
 
 namespace AuthAPI.Controllers;
@@ -23,157 +22,69 @@ public class AuthController : ControllerBase
         _config = config;
     }
 
-    // 1. REGISTER (Customer)
     [HttpPost("register")]
     public async Task<IActionResult> Register(RegisterRequest request)
-    {
-        return await RegisterUserInternal(request, "Customer");
-    }
-
-    // 2. REGISTER ADMIN (Fixed Hashing)
-    [HttpPost("register-admin")]
-    [Authorize(Roles = "SuperAdmin")]
-    public async Task<IActionResult> RegisterAdmin(RegisterRequest request)
     {
         if (await _userRepo.GetUserByEmail(request.Email) != null)
             return BadRequest("Email already exists.");
 
-        if (!string.IsNullOrEmpty(request.Password))
+        // Generate OTP
+        var otp = RandomNumberGenerator.GetInt32(100000, 999999).ToString();
+
+        var user = new User
         {
-            var user = new User
-            {
-                Name = request.Name,
-                Username = request.Username,
-                Email = request.Email,
-                PhoneNumber = request.PhoneNumber,
-                Role = "Admin",
-                IsActive = true,
-                // SECURITY FIX: Use BCrypt for hashing
-                PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
-                OtpCode = null,
-                OtpExpiry = null
-            };
+            Name = request.Name,
+            Username = request.Username,
+            Email = request.Email,
+            PhoneNumber = request.PhoneNumber,
+            Role = "Customer",
+            OtpCode = otp,
+            OtpExpiry = DateTime.UtcNow.AddMinutes(10),
+            IsActive = false,
+            PasswordHash = "", // Will be set on OTP verification
+            Preferences = new UserPreferences()
+        };
 
-            await _userRepo.CreateUser(user);
-            return Ok(new { Message = $"Admin {request.Username} created and activated." });
-        }
+        await _userRepo.CreateUser(user);
 
-        return await RegisterUserInternal(request, "Admin");
+        // In a real app, send email here
+        Console.WriteLine($"[EMAIL SENT] OTP for {request.Email}: {otp}");
+
+        return Ok(new { Message = "User registered. Check email for OTP.", MockOtp = otp });
     }
 
-    // 3. LOGIN (Fixed Verification)
     [HttpPost("login")]
     public async Task<IActionResult> Login(LoginRequest request)
     {
         var user = await _userRepo.GetUserByEmail(request.Email);
 
-        // SECURITY FIX: Use BCrypt.Verify
         if (user == null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
             return BadRequest("Invalid email or password.");
 
         if (!user.IsActive)
             return BadRequest("Account is not active.");
 
-        string token = CreateToken(user);
-        return Ok(new AuthResponse(token, user.Role, user.Name));
+        var token = CreateToken(user);
+        var refreshToken = GenerateRefreshToken();
+
+        await _userRepo.SaveRefreshToken(user.Id, refreshToken);
+
+        return Ok(new AuthResponse(token, user.Role, user.Name, refreshToken));
     }
 
-    // 4. GET ALL ADMINS
-    [HttpGet("admins")]
-    [Authorize(Roles = "SuperAdmin")]
-    public async Task<IActionResult> GetAllAdmins()
-    {
-        var users = await _userRepo.GetUsersByRole("Admin");
-
-        // Map to AdminDto (Safe model)
-        var adminDtos = users.Select(u => new AdminDto(
-            u.Id,
-            u.Name, // Added
-            u.Username,
-            u.Email,
-            u.PhoneNumber,
-            u.IsActive
-        ));
-
-        return Ok(adminDtos);
-    }
-
-    // 5. UPDATE USER
-    [HttpPut("{id}")]
-    [Authorize(Roles = "SuperAdmin")]
-    public async Task<IActionResult> UpdateUser(int id, [FromBody] UpdateAdminRequest request)
-    {
-        // Map UpdateRequest -> Entity
-        var userToUpdate = new User
-        {
-            Id = id,
-            Name = request.Name, // Added
-            Email = request.Email,
-            PhoneNumber = request.PhoneNumber,
-            IsActive = request.IsActive
-        };
-
-        await _userRepo.UpdateUser(userToUpdate);
-        return Ok("User updated successfully.");
-    }
-
-    // (Internal Helper: Updated to include Name)
-    private async Task<IActionResult> RegisterUserInternal(RegisterRequest request, string role)
-    {
-        if (await _userRepo.GetUserByEmail(request.Email) != null)
-            return BadRequest("Email already exists.");
-
-        string otp = GenerateOtp();
-
-        var user = new User
-        {
-            Name = request.Name, // Added
-            Username = request.Username,
-            Email = request.Email,
-            PhoneNumber = request.PhoneNumber,
-            Role = role,
-            OtpCode = otp,
-            OtpExpiry = DateTime.UtcNow.AddMinutes(10),
-            IsActive = false,
-            PasswordHash = ""
-        };
-
-        await _userRepo.CreateUser(user);
-        Console.WriteLine($"[EMAIL SENT] OTP: {otp}");
-        return Ok(new { Message = $"User registered as {role}. Check email for OTP.", MockOtp = otp });
-    }
-
-    // 6. VERIFY OTP (Fixed Hashing)
     [HttpPost("verify-otp")]
     public async Task<IActionResult> VerifyOtp(VerifyOtpRequest request)
     {
         var user = await _userRepo.GetUserByEmail(request.Email);
         if (user == null) return BadRequest("User not found.");
 
-        // Ensure secure comparison (optional but good practice) and expiry check
         if (user.OtpCode != request.Otp || user.OtpExpiry < DateTime.UtcNow)
-            return BadRequest("Invalid OTP.");
+            return BadRequest("Invalid or expired OTP.");
 
-        // SECURITY FIX: Hash the new password with BCrypt before saving
-        string newPasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+        var hashedPassword = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+        await _userRepo.ActivateUserAndSetPassword(user.Id, hashedPassword);
 
-        await _userRepo.ActivateUserAndSetPassword(user.Id, newPasswordHash);
-        return Ok("Password set successfully.");
-    }
-
-    // 7. DELETE USER
-    [HttpDelete("{id}")]
-    [Authorize(Roles = "SuperAdmin")]
-    public async Task<IActionResult> DeleteUser(int id)
-    {
-        await _userRepo.DeleteUser(id);
-        return Ok("User deleted successfully.");
-    }
-
-    private string GenerateOtp()
-    {
-        // SECURITY FIX: Use Cryptographically Secure RNG
-        return RandomNumberGenerator.GetInt32(100000, 999999).ToString();
+        return Ok("Account activated and password set.");
     }
 
     private string CreateToken(User user)
@@ -185,30 +96,26 @@ public class AuthController : ControllerBase
             new Claim("role", user.Role),
             new Claim("userid", user.Id.ToString())
         };
-        if (!string.IsNullOrEmpty(user.Name)) claims.Add(new Claim("name", user.Name));
 
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]));
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]!));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         var token = new JwtSecurityToken(
             issuer: _config["Jwt:Issuer"],
             audience: _config["Jwt:Audience"],
             claims: claims,
-            expires: DateTime.Now.AddDays(1),
+            expires: DateTime.UtcNow.AddMinutes(60), // Short lived access token
             signingCredentials: creds
         );
+
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
-    
-    // 8. FORGOT PASSWORD
-    [HttpPost("forgot-password")]
-    public async Task<IActionResult> ForgotPassword(ForgotPasswordRequest request)
+
+    private string GenerateRefreshToken()
     {
-        var user = await _userRepo.GetUserByEmail(request.Email);
-        if (user == null) return BadRequest("User not found.");
-        string otp = GenerateOtp();
-        await _userRepo.UpdateUserOtp(user.Id, otp, DateTime.UtcNow.AddMinutes(10));
-        Console.WriteLine($"[EMAIL SENT] OTP: {otp}");
-        return Ok(new { Message = "OTP sent.", MockOtp = otp });
+        var randomNumber = new byte[32];
+        using var rng = RandomNumberGenerator.Create();
+        rng.GetBytes(randomNumber);
+        return Convert.ToBase64String(randomNumber);
     }
 }

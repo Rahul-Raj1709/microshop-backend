@@ -12,7 +12,6 @@ var builder = WebApplication.CreateBuilder(args);
 
 // --- ADDED: Register Dapper Type Handlers for JSONB ---
 SqlMapper.AddTypeHandler(new JsonTypeHandler<UserPreferences>());
-SqlMapper.AddTypeHandler(new JsonTypeHandler<UserProfileData>());
 // -----------------------------------------------------
 
 builder.Services.AddControllers();

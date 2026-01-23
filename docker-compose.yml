@@ -59,7 +59,7 @@ services:
       - Kafka__Topic=order-requests
       - Kafka__ReviewTopic=review-events
       - ASPNETCORE_ENVIRONMENT=Development
-      - ConnectionStrings__DefaultConnection=Host=host.docker.internal;Port=5432;Database=shop_db;Username=root;Password=kerberos1
+      - ConnectionStrings__DefaultConnection=Host=host.docker.internal;Port=5432;Database=sales_db;Username=root;Password=kerberos1
     depends_on:
       kafka:
         condition: service_healthy
@@ -75,7 +75,8 @@ services:
       - "5003:8080"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
-
+      - ConnectionStrings__DefaultConnection=Host=host.docker.internal;Port=5432;Database=sales_db;Username=root;Password=kerberos1
+      
   # 5. CART API (New: Redis Shopping Cart)
   cart-api:
     build:
@@ -98,7 +99,8 @@ services:
       - Kafka__BootstrapServers=kafka:29092 
       - Kafka__Topic=order-requests
       - Kafka__ReviewTopic=review-events
-      - ConnectionStrings__DefaultConnection=Host=host.docker.internal;Port=5432;Database=shop_db;Username=root;Password=kerberos1
+      - ConnectionStrings__CatalogConnection=Host=host.docker.internal;Port=5432;Database=catalog_db;Username=root;Password=kerberos1
+      - ConnectionStrings__SalesConnection=Host=host.docker.internal;Port=5432;Database=sales_db;Username=root;Password=kerberos1
     depends_on:
       kafka:
         condition: service_healthy
@@ -117,7 +119,7 @@ services:
     ports:
       - "5001:8080"
     environment:
-      - ConnectionStrings__DefaultConnection=Host=host.docker.internal;Port=5432;Database=shop_db;Username=root;Password=kerberos1
+      - ConnectionStrings__DefaultConnection=Host=host.docker.internal;Port=5432;Database=identity_db;Username=root;Password=kerberos1
       - ASPNETCORE_ENVIRONMENT=Development
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -130,7 +132,7 @@ services:
     ports:
       - "5002:8080"
     environment:
-      - ConnectionStrings__DefaultConnection=Host=host.docker.internal;Port=5432;Database=shop_db;Username=root;Password=kerberos1
+      - ConnectionStrings__DefaultConnection=Host=host.docker.internal;Port=5432;Database=catalog_db;Username=root;Password=kerberos1
       - ASPNETCORE_ENVIRONMENT=Development
       - Elasticsearch__Uri=http://elasticsearch:9200
     extra_hosts:

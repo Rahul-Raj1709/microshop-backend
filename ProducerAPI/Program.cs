@@ -14,6 +14,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSingleton<DapperContext>();
 builder.Services.AddScoped<IOrderReadRepository, OrderReadRepository>();
 builder.Services.AddScoped<DashboardRepository>();
+builder.Services.AddSingleton<KafkaProducerService>();
 // -----------------------
 // 1. CONFIGURE SWAGGER FOR JWT (Adds the padlock button)
 builder.Services.AddSwaggerGen(c =>
